@@ -30,6 +30,9 @@ clock_end = times(&end);
 (double(end.tms_utime - start.tms_utime) / sysconf(_SC_CLK_TCK)) 
 //
 
+//
+#include <sys/mman.h>
+
 template<typename T>
 T min(const T& v1, const T& v2) {
     return v1 > v2 ? v2 : v1;
@@ -449,16 +452,50 @@ auto test_func(size_t size, size_t count) -> decltype(DELTA_TIME()) {
     return DELTA_TIME();
 }
 
+extern "C" size_t self_modify(size_t);
+
+#include <iostream>
+auto test_self_modify(size_t size, size_t count) -> decltype(DELTA_TIME()) {
+    std::vector<int> arr;
+    for (size_t i = 0; i < size; ++i) {
+        arr.emplace_back(random() % min(count, size_t(40)));
+    }
+
+    START_TIME();
+    for (size_t i = 0; i < size; ++i) {
+        self_modify(arr[i]);
+    }
+    END_TIME();
+    return DELTA_TIME();
+}
 
 constexpr auto count = 40;
 
+int change_page_permissions_of_address(size_t addr) {
+    // Move the pointer to the page boundary
+    int page_size = getpagesize();
+    addr -= (size_t)addr % page_size;
+
+    if(mprotect((void*)addr, page_size, PROT_READ | PROT_WRITE | PROT_EXEC) == -1) {
+        return -1;
+    }
+
+    return 0;
+}
+
 #include <fstream>
 int main() {
+    if (change_page_permissions_of_address((size_t)self_modify) == -1) {
+        std::cout << "BAD" << std::endl;
+    }
+
     std::ofstream fout("test.txt");
     for (size_t i = 2; i < count; ++i) {
         fout << "0 " << i << " " << test_if_else(10000000, i) << std::endl;
         fout << "1 " << i << " " << test_switch(10000000, i) << std::endl;
         fout << "2 " << i << " " << test_func(10000000, i) << std::endl;
+        fout << "3 " << i << " " << test_self_modify(10000000, i) << std::endl;
     }
+    // test_self_modify(3, 2);
     return 0;
 }
